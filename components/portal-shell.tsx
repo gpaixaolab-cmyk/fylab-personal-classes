@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { PasswordAccess, IndividualStudentRouter, PersonalTeacher, PersonalInbox } from "@/components/felipe-space";
 
 type Profile = { id: string; role: "teacher" | "student"; display_name: string | null };
 type Student = { id: string; teacher_id: string; auth_user_id: string | null; first_name: string; active: boolean; created_at: string };
@@ -100,8 +101,10 @@ export function PortalShell({ renderExam }: { renderExam: (context: ExamContext)
   if (!session) return <AccessScreen onAuthenticated={() => supabase.auth.getSession().then(({ data }) => loadIdentity(data.session))} />;
   if (identityError && !profile) return <SetupRequired message={identityError} onSignOut={() => supabase.auth.signOut()} />;
   if (profile?.role === "teacher") return <TeacherDashboard profile={profile} onSignOut={() => supabase.auth.signOut()} />;
+  if (!student && !session.user.is_anonymous) return <SetupRequired message="A conta entrou, mas ainda não está vinculada a um aluno. Peça ao professor que confira o cadastro." onSignOut={() => supabase.auth.signOut()} />;
   if (!student) return <StudentCodeScreen session={session} onClaimed={() => loadIdentity(session)} onSignOut={() => supabase.auth.signOut()} />;
-  return <StudentDashboard student={student} onSignOut={() => supabase.auth.signOut()} renderExam={renderExam} />;
+  if (!student.active) return <SetupRequired message="Este acesso está desativado. Fale com seu professor." onSignOut={() => supabase.auth.signOut()} />;
+  return <IndividualStudentRouter student={student} onSignOut={() => supabase.auth.signOut()} legacy={<StudentDashboard student={student} onSignOut={() => supabase.auth.signOut()} renderExam={renderExam} />} />;
 }
 
 function FullScreenLoading({ label }: { label: string }) {
@@ -109,69 +112,30 @@ function FullScreenLoading({ label }: { label: string }) {
 }
 
 function AccessScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [mode, setMode] = useState<"student" | "teacher">("student");
-  const [teacherMode, setTeacherMode] = useState<"login" | "signup">("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-
-  async function studentAccess(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true); setMessage("");
-    const { data, error } = await supabase.auth.signInAnonymously();
-    if (error || !data.session) {
-      setMessage(error?.message || "Não foi possível iniciar o acesso de aluno.");
-      setBusy(false); return;
-    }
-    const { error: claimError } = await supabase.rpc("claim_student_access", { p_access_code: code });
-    if (claimError) {
-      await supabase.auth.signOut();
-      setMessage(claimError.message);
-      setBusy(false); return;
-    }
-    onAuthenticated();
-  }
-
-  async function teacherAccess(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true); setMessage("");
-    if (teacherMode === "signup") {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { display_name: name }, emailRedirectTo: window.location.href },
-      });
-      if (error) setMessage(error.message);
-      else if (!data.session) setMessage("Conta criada. Confirme o e-mail e depois entre como professora.");
-      else onAuthenticated();
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setMessage(error.message); else onAuthenticated();
-    }
-    setBusy(false);
-  }
-
-  return <main className="min-h-screen px-4 py-8 text-slate-100 sm:px-8 sm:py-14">
-    <div className="mx-auto grid max-w-6xl overflow-hidden rounded-[2rem] border border-white/10 bg-[#081827]/90 shadow-2xl shadow-black/30 lg:grid-cols-[1.05fr_.95fr]">
-      <section className="signal-grid flex min-h-[370px] flex-col justify-between border-0 p-7 sm:p-12 lg:min-h-[680px] lg:border-r lg:border-white/10">
-        <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-cyan-300 text-[#071321]"><GraduationCap /></div><div><p className="font-semibold tracking-tight">FYLAB Personal Classes</p><p className="text-xs text-slate-400">learning hub</p></div></div>
-        <div className="max-w-xl"><p className="eyebrow">Aulas particulares • CEFR</p><h1 className="mt-4 text-4xl font-semibold leading-[1.05] tracking-[-.04em] sm:text-6xl">Inglês acompanhado de verdade.</h1><p className="mt-5 max-w-lg leading-7 text-slate-300">Aulas, atividades, progresso e avaliações descritivas em um só lugar — no ritmo de cada aluno.</p></div>
-        <p className="text-xs leading-5 text-slate-500">Ambiente privado. O professor controla alunos e conteúdos.</p>
-      </section>
-      <section className="flex items-center p-6 sm:p-10 lg:p-14"><div className="w-full">
-        <div className="grid grid-cols-2 rounded-xl bg-white/5 p-1"><button onClick={() => { setMode("student"); setMessage(""); }} className={`rounded-lg px-4 py-3 text-sm transition ${mode === "student" ? "bg-cyan-300 font-medium text-[#071321]" : "text-slate-400"}`}>Sou aluno</button><button onClick={() => { setMode("teacher"); setMessage(""); }} className={`rounded-lg px-4 py-3 text-sm transition ${mode === "teacher" ? "bg-cyan-300 font-medium text-[#071321]" : "text-slate-400"}`}>Sou professora</button></div>
-        {mode === "student" ? <form onSubmit={studentAccess} className="mt-8"><p className="eyebrow">Entrada do aluno</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">Qual é o seu código?</h2><p className="mt-3 text-sm leading-6 text-slate-400">Use o código de 8 ou mais caracteres enviado pela professora.</p><label className="mt-7 block text-xs font-medium uppercase tracking-wider text-slate-400">Código de acesso</label><Input autoFocus required minLength={8} value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="EX.: ALICE-27" className="mt-2 h-12 border-white/10 bg-[#06101d] text-base uppercase tracking-widest" /><Button disabled={busy || code.trim().length < 8} className="mt-4 h-12 w-full bg-cyan-300 text-[#071321] hover:bg-cyan-200">{busy ? <LoaderCircle className="animate-spin" /> : <LockKeyhole />}Entrar no meu espaço</Button></form> : <form onSubmit={teacherAccess} className="mt-8"><p className="eyebrow">Área da professora</p><h2 className="mt-3 text-3xl font-semibold tracking-tight">{teacherMode === "login" ? "Acompanhe seus alunos" : "Crie sua conta principal"}</h2>{teacherMode === "signup" && <><label className="mt-6 block text-xs font-medium uppercase tracking-wider text-slate-400">Seu nome</label><Input required value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-11 border-white/10 bg-[#06101d]" /></>}<label className={`${teacherMode === "signup" ? "mt-4" : "mt-7"} block text-xs font-medium uppercase tracking-wider text-slate-400`}>E-mail</label><Input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="mt-2 h-11 border-white/10 bg-[#06101d]" /><label className="mt-4 block text-xs font-medium uppercase tracking-wider text-slate-400">Senha</label><Input type="password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 h-11 border-white/10 bg-[#06101d]" /><Button disabled={busy} className="mt-5 h-12 w-full bg-cyan-300 text-[#071321] hover:bg-cyan-200">{busy ? <LoaderCircle className="animate-spin" /> : <ShieldCheck />}{teacherMode === "login" ? "Entrar como professora" : "Criar conta da professora"}</Button><button type="button" onClick={() => { setTeacherMode(teacherMode === "login" ? "signup" : "login"); setMessage(""); }} className="mt-4 w-full text-center text-xs text-cyan-200 hover:text-cyan-100">{teacherMode === "login" ? "Primeiro acesso? Criar conta" : "Já tenho conta"}</button></form>}
-        {message && <div className="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/10 p-3 text-sm leading-5 text-amber-100">{message}</div>}
-      </div></section>
-    </div>
-  </main>;
+ const [teacher,setTeacher]=useState(false),[legacy,setLegacy]=useState(false);
+ const [email,setEmail]=useState(""),[password,setPassword]=useState(""),[code,setCode]=useState("");
+ const [busy,setBusy]=useState(false),[message,setMessage]=useState("");
+ async function enter(e:FormEvent){e.preventDefault();setBusy(true);setMessage("");
+  try{
+   if(teacher){const {error}=await supabase.auth.signInWithPassword({email,password});if(error)throw error;}
+   else {const {error}=await supabase.auth.signInAnonymously();if(error)throw error;
+    const claim=await supabase.rpc("claim_student_access",{p_access_code:code});
+    if(claim.error){await supabase.auth.signOut();throw claim.error;}}
+   onAuthenticated();
+  }catch(e){setMessage(e instanceof Error?e.message:"Não foi possível entrar. Confira seus dados.");}finally{setBusy(false);}
+ }
+ return <main className="min-h-screen px-4 py-10 text-slate-100 sm:py-20">
+ <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-2">
+ <section className="p-5 sm:p-10"><div className="flex items-center gap-3 text-cyan-200"><GraduationCap/><span>FYLAB Personal Classes</span></div><p className="eyebrow mt-16">Seu percurso, suas conquistas</p><h1 className="mt-5 text-4xl font-semibold leading-tight sm:text-5xl">Um espaço de inglês feito para você.</h1><p className="mt-6 text-lg leading-8 text-slate-300">Encontre suas aulas, retome suas atividades e acompanhe as orientações do seu professor.</p><p className="mt-8 text-sm leading-7 text-slate-400">Cada aluno acessa somente a própria área. O professor acompanha o progresso e publica o parecer descritivo.</p></section>
+ <section className="exam-card"><div className="mb-8 grid grid-cols-2 gap-3"><Button variant={!teacher?"default":"outline"} onClick={()=>{setTeacher(false);setMessage("");}}>Sou aluno</Button><Button variant={teacher?"default":"outline"} onClick={()=>{setTeacher(true);setMessage("");}}>Sou professor</Button></div>
+ {!teacher&&!legacy?<><PasswordAccess onAuthenticated={onAuthenticated}/><button className="mt-7 text-sm text-cyan-200 underline" onClick={()=>setLegacy(true)}>Tenho um código antigo de acesso</button></>:<form className="space-y-5" onSubmit={enter}><h2 className="text-2xl font-semibold">{teacher?"Entrada do professor":"Acesso anterior por código"}</h2>
+ {teacher?<><label className="block space-y-2"><span>E-mail</span><Input required type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)}/></label><label className="block space-y-2"><span>Senha</span><Input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label></>:<label className="block space-y-2"><span>Código fornecido pelo professor</span><Input required minLength={8} autoComplete="off" value={code} onChange={e=>setCode(e.target.value.toUpperCase())}/></label>}
+ <Button disabled={busy} className="w-full">{busy?"Entrando…":"Entrar"}</Button>{!teacher&&<button type="button" onClick={()=>setLegacy(false)} className="text-sm text-cyan-200 underline">Voltar para usuário e senha</button>}
+ </form>}{message&&<p role="alert" className="mt-5 text-amber-200">{message}</p>}</section></div></main>;
 }
 
 function SetupRequired({ message, onSignOut }: { message: string; onSignOut: () => void }) {
-  return <main className="grid min-h-screen place-items-center px-5"><div className="exam-card max-w-xl text-center"><ShieldCheck className="mx-auto text-amber-300" /><h1 className="mt-4 text-2xl font-semibold">O banco ainda precisa ser ativado</h1><p className="mt-3 text-sm leading-6 text-slate-400">Execute o arquivo <b>supabase/schema.sql</b> no SQL Editor do projeto e tente novamente.</p><p className="mt-4 rounded-lg bg-white/5 p-3 text-left text-xs text-slate-500">{message}</p><Button variant="outline" className="mt-5 border-white/10 bg-white/5 text-white" onClick={onSignOut}>Voltar</Button></div></main>;
+  return <main className="grid min-h-screen place-items-center px-5"><div className="exam-card max-w-xl text-center"><ShieldCheck className="mx-auto text-amber-300" /><h1 className="mt-4 text-2xl font-semibold">Não foi possível abrir sua área</h1><p className="mt-3 text-sm leading-6 text-slate-400">Peça ao professor para verificar o acesso e a configuração do banco. Não reexecute o cadastro inicial.</p><p className="mt-4 rounded-lg bg-white/5 p-3 text-left text-xs text-slate-500">{message}</p><Button variant="outline" className="mt-5 border-white/10 bg-white/5 text-white" onClick={onSignOut}>Voltar</Button></div></main>;
 }
 
 function StudentCodeScreen({ session, onClaimed, onSignOut }: { session: Session; onClaimed: () => void; onSignOut: () => void }) {
@@ -180,27 +144,30 @@ function StudentCodeScreen({ session, onClaimed, onSignOut }: { session: Session
   return <main className="grid min-h-screen place-items-center px-5"><form onSubmit={claim} className="exam-card w-full max-w-md"><p className="eyebrow">Concluir acesso</p><h1 className="mt-3 text-3xl font-semibold">Código do aluno</h1><Input required minLength={8} value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} className="mt-6 h-12 border-white/10 bg-[#06101d] uppercase tracking-widest" /><Button disabled={busy || !session.user.is_anonymous} className="mt-4 w-full bg-cyan-300 text-[#071321]">{busy ? <LoaderCircle className="animate-spin" /> : <LockKeyhole />}Confirmar</Button>{message && <p className="mt-4 text-sm text-amber-200">{message}</p>}<button type="button" onClick={onSignOut} className="mt-5 w-full text-xs text-slate-500">Sair</button></form></main>;
 }
 
-type TeacherTab = "overview" | "students" | "lessons" | "results";
+type TeacherTab = "overview" | "students" | "lessons" | "results" | "personal";
 
 function TeacherDashboard({ profile, onSignOut }: { profile: Profile; onSignOut: () => void }) {
   const [tab, setTab] = useState<TeacherTab>("overview");
+  const [personalIds, setPersonalIds] = useState<string[]>([]);
   const [students, setStudents] = useState<Student[]>([]); const [courses, setCourses] = useState<Course[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]); const [progress, setProgress] = useState<LessonProgress[]>([]); const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [loading, setLoading] = useState(true); const [message, setMessage] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true); setMessage("");
-    const [studentResult, courseResult, lessonResult, progressResult, attemptResult] = await Promise.all([
+    const [studentResult, courseResult, lessonResult, progressResult, attemptResult, personalResult] = await Promise.all([
       supabase.from("students").select("id, teacher_id, auth_user_id, first_name, active, created_at").order("first_name"),
       supabase.from("courses").select("id, teacher_id, title, description, cefr_level, active").order("created_at"),
       supabase.from("lessons").select("id, course_id, title, summary, position, content, published, updated_at").order("position"),
       supabase.from("lesson_progress").select("id, student_id, lesson_id, status, progress, updated_at"),
       supabase.from("attempts").select("id, student_id, assessment_title, status, submitted_at, writing, speaking_transcripts, domain_summary, narrative, teacher_feedback").order("created_at", { ascending: false }),
+      supabase.from("personal_spaces").select("student_id"),
     ]);
     const error = studentResult.error || courseResult.error || lessonResult.error || progressResult.error || attemptResult.error;
     if (error) setMessage(error.message);
     setStudents((studentResult.data || []) as Student[]); setCourses((courseResult.data || []) as Course[]);
     setLessons((lessonResult.data || []) as Lesson[]); setProgress((progressResult.data || []) as LessonProgress[]); setAttempts((attemptResult.data || []) as Attempt[]);
+    setPersonalIds((personalResult.data || []).map(item => item.student_id));
     setLoading(false);
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
@@ -212,13 +179,15 @@ function TeacherDashboard({ profile, onSignOut }: { profile: Profile; onSignOut:
     completions: progress.filter((item) => item.status === "completed").length,
   }), [students, lessons, attempts, progress]);
 
-  return <PortalFrame name={profile.display_name || "Professora"} role="Professora" onSignOut={onSignOut} nav={<>{([
-    ["overview", LayoutDashboard, "Visão geral"], ["students", Users, "Alunos"], ["lessons", BookOpen, "Conteúdos"], ["results", ClipboardCheck, "Resultados"],
+  return <PortalFrame name={profile.display_name || "Professor"} role="Professor" onSignOut={onSignOut} nav={<>{([
+    ["overview", LayoutDashboard, "Visão geral"], ["personal", UserRound, "Área individual"], ["students", Users, "Alunos"], ["lessons", BookOpen, "Conteúdos"], ["results", ClipboardCheck, "Resultados"],
   ] as const).map(([key, Icon, label]) => <button key={key} onClick={() => setTab(key)} className={`portal-nav-item ${tab === key ? "portal-nav-active" : ""}`}><Icon size={18} />{label}{key === "results" && stats.pendingReviews > 0 && <span className="ml-auto rounded-full bg-amber-300 px-2 py-0.5 text-[10px] font-bold text-[#071321]">{stats.pendingReviews}</span>}</button>)}</>}>
     {message && <div className="mb-5 rounded-xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">{message}</div>}
     {loading ? <div className="grid min-h-80 place-items-center"><LoaderCircle className="animate-spin text-cyan-300" /></div> : <>
-      {tab === "overview" && <TeacherOverview stats={stats} students={students} lessons={lessons} attempts={attempts} progress={progress} onNavigate={setTab} />}
-      {tab === "students" && <StudentsManager students={students} lessons={lessons} progress={progress} refresh={refresh} setMessage={setMessage} />}
+      {(tab === "overview" || tab === "results" || tab === "students") && <PersonalInbox students={students} onOpen={() => setTab("personal")} />}
+      {tab === "personal" && <PersonalTeacher students={students} refresh={refresh} />}
+      {tab === "overview" && <TeacherOverview stats={stats} students={students.filter(s => !personalIds.includes(s.id))} lessons={lessons} attempts={attempts} progress={progress} onNavigate={setTab} />}
+      {tab === "students" && <StudentsManager students={students.filter(s => !personalIds.includes(s.id))} lessons={lessons} progress={progress} refresh={refresh} setMessage={setMessage} />}
       {tab === "lessons" && <LessonsManager courses={courses} lessons={lessons} refresh={refresh} setMessage={setMessage} />}
       {tab === "results" && <ResultsManager students={students} attempts={attempts} refresh={refresh} setMessage={setMessage} />}
     </>}
@@ -239,7 +208,7 @@ function StudentsManager({ students, lessons, progress, refresh, setMessage }: a
   function newCode() { const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let value = ""; crypto.getRandomValues(new Uint32Array(8)).forEach((number) => value += chars[number % chars.length]); setCode(value); }
   async function addStudent(event: FormEvent) { event.preventDefault(); setBusy(true); setMessage(""); const { error } = await supabase.rpc("create_student", { p_name: name, p_access_code: code, p_guardian_consent: consent }); if (error) setMessage(error.message); else { setCreatedCode(code); setName(""); setCode(""); setConsent(false); await refresh(); } setBusy(false); }
   async function resetAccess(student: Student) { const freshCode = window.prompt(`Digite o novo código de ${student.first_name} (mínimo 8 caracteres):`); if (!freshCode) return; const { error } = await supabase.rpc("reset_student_access", { p_student_id: student.id, p_new_access_code: freshCode }); if (error) setMessage(error.message); else setMessage(`Novo código de ${student.first_name}: ${freshCode.toUpperCase()}. Envie e guarde este código.`); }
-  return <div><p className="eyebrow">Gestão de acesso</p><h1 className="portal-title">Alunos</h1><p className="portal-subtitle">Cadastre somente o primeiro nome e entregue um código individual.</p><div className="mt-8 grid gap-6 xl:grid-cols-[.72fr_1.28fr]"><form onSubmit={addStudent} className="exam-card h-fit"><div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-xl bg-cyan-300/10 text-cyan-200"><Plus size={18} /></div><h2 className="font-medium">Novo aluno</h2></div><label className="mt-6 block text-xs uppercase tracking-wider text-slate-500">Primeiro nome</label><Input required value={name} onChange={(event) => setName(event.target.value)} className="mt-2 border-white/10 bg-[#06101d]" /><label className="mt-4 block text-xs uppercase tracking-wider text-slate-500">Código de acesso</label><div className="mt-2 flex gap-2"><Input required minLength={8} value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} className="border-white/10 bg-[#06101d] uppercase tracking-widest" /><Button type="button" variant="outline" onClick={newCode} title="Gerar código" className="border-white/10 bg-white/5 text-white"><RefreshCcw /></Button></div><label className="mt-5 flex cursor-pointer gap-3 rounded-xl border border-white/10 p-3"><Checkbox checked={consent} onCheckedChange={(value) => setConsent(value === true)} /><span className="text-xs leading-5 text-slate-400">Confirmo que o responsável autorizou o uso pedagógico dos dados e das transcrições.</span></label><Button disabled={busy || !consent} className="mt-5 w-full bg-cyan-300 text-[#071321]">{busy ? <LoaderCircle className="animate-spin" /> : <Plus />}Cadastrar aluno</Button>{createdCode && <div className="mt-5 rounded-xl border border-emerald-300/20 bg-emerald-300/10 p-4"><p className="text-xs text-emerald-200">Código criado — copie agora</p><p className="mt-2 text-xl font-semibold tracking-widest">{createdCode}</p><p className="mt-2 text-[11px] leading-4 text-slate-400">Por segurança, ele não será mostrado novamente.</p></div>}</form><section className="exam-card"><h2 className="font-medium">Turma atual</h2><div className="mt-5 space-y-3">{students.length ? students.map((student: Student) => { const done = progress.filter((item: LessonProgress) => item.student_id === student.id && item.status === "completed").length; const total = lessons.filter((item: Lesson) => item.published).length; return <article key={student.id} className="flex flex-col gap-4 rounded-xl border border-white/8 bg-white/[.025] p-4 sm:flex-row sm:items-center"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-cyan-300/10 text-cyan-200"><UserRound size={18} /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{student.first_name}</h3><span className={`rounded-full px-2 py-0.5 text-[10px] ${student.auth_user_id ? "bg-emerald-300/10 text-emerald-200" : "bg-amber-300/10 text-amber-200"}`}>{student.auth_user_id ? "acesso ativo" : "aguardando primeiro acesso"}</span></div><p className="mt-1 text-xs text-slate-500">{done} de {total} conteúdos concluídos</p></div><Button variant="outline" onClick={() => resetAccess(student)} className="border-white/10 bg-white/5 text-xs text-slate-200 hover:bg-white/10 hover:text-white"><RefreshCcw />Novo código</Button></article> }) : <EmptyText text="Nenhum aluno cadastrado." />}</div></section></div></div>;
+  return <div><p className="eyebrow">Gestão de acesso</p><h1 className="portal-title">Alunos</h1><p className="portal-subtitle">Cadastros anteriores por código. Para Felipe, use Área individual e cadastre usuário e senha.</p><div className="mt-8 grid gap-6 xl:grid-cols-[.72fr_1.28fr]"><form onSubmit={addStudent} className="exam-card h-fit"><div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-xl bg-cyan-300/10 text-cyan-200"><Plus size={18} /></div><h2 className="font-medium">Novo aluno</h2></div><label className="mt-6 block text-xs uppercase tracking-wider text-slate-500">Primeiro nome</label><Input required value={name} onChange={(event) => setName(event.target.value)} className="mt-2 border-white/10 bg-[#06101d]" /><label className="mt-4 block text-xs uppercase tracking-wider text-slate-500">Código de acesso</label><div className="mt-2 flex gap-2"><Input required minLength={8} value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} className="border-white/10 bg-[#06101d] uppercase tracking-widest" /><Button type="button" variant="outline" onClick={newCode} title="Gerar código" className="border-white/10 bg-white/5 text-white"><RefreshCcw /></Button></div><label className="mt-5 flex cursor-pointer gap-3 rounded-xl border border-white/10 p-3"><Checkbox checked={consent} onCheckedChange={(value) => setConsent(value === true)} /><span className="text-xs leading-5 text-slate-400">Confirmo que o responsável autorizou o uso pedagógico dos dados e das transcrições.</span></label><Button disabled={busy || !consent} className="mt-5 w-full bg-cyan-300 text-[#071321]">{busy ? <LoaderCircle className="animate-spin" /> : <Plus />}Cadastrar aluno</Button>{createdCode && <div className="mt-5 rounded-xl border border-emerald-300/20 bg-emerald-300/10 p-4"><p className="text-xs text-emerald-200">Código criado — copie agora</p><p className="mt-2 text-xl font-semibold tracking-widest">{createdCode}</p><p className="mt-2 text-[11px] leading-4 text-slate-400">Por segurança, ele não será mostrado novamente.</p></div>}</form><section className="exam-card"><h2 className="font-medium">Turma atual</h2><div className="mt-5 space-y-3">{students.length ? students.map((student: Student) => { const done = progress.filter((item: LessonProgress) => item.student_id === student.id && item.status === "completed").length; const total = lessons.filter((item: Lesson) => item.published).length; return <article key={student.id} className="flex flex-col gap-4 rounded-xl border border-white/8 bg-white/[.025] p-4 sm:flex-row sm:items-center"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-cyan-300/10 text-cyan-200"><UserRound size={18} /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{student.first_name}</h3><span className={`rounded-full px-2 py-0.5 text-[10px] ${student.auth_user_id ? "bg-emerald-300/10 text-emerald-200" : "bg-amber-300/10 text-amber-200"}`}>{student.auth_user_id ? "acesso ativo" : "aguardando primeiro acesso"}</span></div><p className="mt-1 text-xs text-slate-500">{done} de {total} conteúdos concluídos</p></div><Button variant="outline" onClick={() => resetAccess(student)} className="border-white/10 bg-white/5 text-xs text-slate-200 hover:bg-white/10 hover:text-white"><RefreshCcw />Novo código</Button></article> }) : <EmptyText text="Nenhum aluno cadastrado." />}</div></section></div></div>;
 }
 
 function LessonsManager({ courses, lessons, refresh, setMessage }: any) {
