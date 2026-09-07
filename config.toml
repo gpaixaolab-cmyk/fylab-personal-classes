@@ -1,0 +1,4 @@
+[functions.manage-personal-student]
+# The function independently validates the user token using auth.getUser, then the teacher role.
+# The user's dashboard exposes legacy-secret-only verification; authentication remains in the handler.
+verify_jwt = false
