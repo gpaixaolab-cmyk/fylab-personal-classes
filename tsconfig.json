@@ -30,5 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "dist", "out", "db", "build", "worker", "examples", "vite.config.ts", "supabase/functions", "FYLAB-PORTAL-ATUALIZACAO", "alice-360-github-pages (1)"]
+  "exclude": ["node_modules", "dist", "out", "db", "build", "worker", "examples", "vite.config.ts", "supabase/functions", "index.ts", "felipe-space.tsx", "felipe-assessment.ts", "portal-shell.tsx", "FYLAB-PORTAL-ATUALIZACAO", "alice-360-github-pages (1)"]
 }
